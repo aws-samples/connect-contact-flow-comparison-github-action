@@ -9,6 +9,10 @@ inputs:
   github_pat:
     description: "The Github token with permissions to repo"
     required: true
+  use_bedrock:
+    description: "Whether to use Amazon Bedrock for intelligent comparison (true/false)"
+    required: false
+    default: 'true'
   repo_owner:
     description: "The Github owner of the repo"
     required: true
@@ -50,7 +54,8 @@ runs:
           --owner ${{ inputs.repo_owner }} \
           --repo ${{ inputs.repo }} \
           --commit ${{ inputs.commit_sha }} \
-          --contact_flow_path ${{ inputs.contact_flow_path }}
+          --contact_flow_path ${{ inputs.contact_flow_path }} \
+          --use-bedrock ${{ inputs.use_bedrock }}
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4

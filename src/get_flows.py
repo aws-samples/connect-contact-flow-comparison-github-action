@@ -57,20 +57,23 @@ def extract_code_simple(response):
         logger.warning("No code blocks found in response")
         return []
        
-def compare_contact_flows(fileName: str, file1_path: str, file2_path: str) -> str:
+def compare_contact_flows(fileName: str, file1_path: str, file2_path: str, use_bedrock: bool = True) -> tuple[list, dict]:
     """
-    Compares two contact flow JSON files and generates an HTML visualization using Mermaid diagrams.
+    Compares two contact flow JSON files and generates an HTML visualization.
+    If use_bedrock is True, uses Bedrock for intelligent comparison with Mermaid diagrams.
+    If use_bedrock is False, creates a simple side-by-side JSON comparison.
     
     Args:
         fileName (str): Base name for output files
         file1_path (str): Path to original contact flow JSON
         file2_path (str): Path to modified contact flow JSON
+        use_bedrock (bool): Whether to use Bedrock for comparison
         
     Returns:
-        str: Generated HTML content containing the comparison visualization
+        tuple: (list of generated HTML content, response metadata)
         
     Raises:
-        Exception: If file reading or Bedrock API call fails
+        Exception: If file reading fails
     """
     
     # Read and load the JSON files
@@ -80,6 +83,62 @@ def compare_contact_flows(fileName: str, file1_path: str, file2_path: str) -> st
             flow2 = json.load(f2)
     except Exception as e:
         raise Exception(f"Error reading input files: {str(e)}") from e
+
+    if not use_bedrock:
+        # Create simple side-by-side comparison
+        html_content = f"""<!DOCTYPE html>
+        <html>
+        <head>
+            <title>Contact Flow Comparison - {fileName}</title>
+            <style>
+                body {{
+                    margin: 40px;
+                    font-family: Arial, sans-serif;
+                    background-color: #f5f5f5;
+                }}
+                h1 {{
+                    color: #333;
+                    margin-bottom: 30px;
+                }}
+                .comparison-container {{
+                    display: flex;
+                    gap: 20px;
+                    margin-top: 20px;
+                }}
+                .flow-version {{
+                    flex: 1;
+                    background: white;
+                    padding: 20px;
+                    border-radius: 8px;
+                    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+                }}
+                pre {{
+                    white-space: pre-wrap;
+                    word-wrap: break-word;
+                    overflow-x: auto;
+                }}
+            </style>
+        </head>
+        <body>
+            <h1>Contact Flow Comparison - {fileName}</h1>
+            <div class="comparison-container">
+                <div class="flow-version">
+                    <h2>Original Version</h2>
+                    <pre>{json.dumps(flow1, indent=2)}</pre>
+                </div>
+                <div class="flow-version">
+                    <h2>Modified Version</h2>
+                    <pre>{json.dumps(flow2, indent=2)}</pre>
+                </div>
+            </div>
+        </body>
+        </html>"""
+        
+        output_path = Path(f'{fileName}.html')
+        output_path.write_text(html_content)
+        return [html_content], {'ResponseMetadata': {'RequestId': 'N/A'}}
+
+    # If use_bedrock is True, proceed with Bedrock comparison
     htmlTemplate = '''  <!DOCTYPE html>
 <html>
 <head>
@@ -398,6 +457,11 @@ def main():
     parser.add_argument('--output-dir', '-d',
                         default='.',
                         help='Output directory for saved files (default: current directory)')
+    
+    parser.add_argument('--use-bedrock', '-b',
+                        type=lambda x: x.lower() == 'true',
+                        default=True,
+                        help='Whether to use Bedrock for comparison (default: true)')
 
     # Parse arguments
     args = parser.parse_args()
@@ -409,8 +473,8 @@ def main():
     # Get file versions
     logger.info(f"From commit: {args.commit}")
     
-    # Initialize Metrics Collection
-    metrics_collector = BedrockMetricsCollector()
+    # Initialize Metrics Collection if using Bedrock
+    metrics_collector = BedrockMetricsCollector() if args.use_bedrock else None
     
     filepaths  = get_file_paths(
         args.token,
@@ -449,19 +513,20 @@ def main():
       # Save files
       save_versions(original, modified, original_path, modified_path)
       
-      html_result, resp_metadata = compare_contact_flows(base_filename, original_path, modified_path)
+      html_result, resp_metadata = compare_contact_flows(base_filename, original_path, modified_path, args.use_bedrock)
       
       if html_result:
         html_results.append(f"{base_filename}.html")
-      # Collect metrics
-      
-      metrics_collector.add_metric(resp_metadata)
+      # Collect metrics if using Bedrock
+      if metrics_collector:
+          metrics_collector.add_metric(resp_metadata)
         
       logger.info(f"Comparison complete! Results saved to {base_filename}.html")
     
-    # Process Bedrock Metrics
-    metrics_collector.save_metrics()
-    metrics_collector.generate_html_report() 
+    # Process Bedrock Metrics if using Bedrock
+    if metrics_collector:
+        metrics_collector.save_metrics()
+        metrics_collector.generate_html_report() 
     # Create index.html after processing all files
     logger.info(f"html_results: {html_results}")
     if html_results:
@@ -484,7 +549,8 @@ def main():
             f.write('  <div class="link-list">')
             for result in html_results:
                 f.write(f'      <a href="./{result}">{result}</a>\n')
-            f.write('<a href="./bedrock_metrics.html">View API Metrics Report</a>')
+            if args.use_bedrock:
+                f.write('<a href="./bedrock_metrics.html">View API Metrics Report</a>')
             f.write('''
                 </div>
             </body>
